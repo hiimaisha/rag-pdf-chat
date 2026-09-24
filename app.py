@@ -357,7 +357,7 @@ if uploaded_file is not None:
             st.write(f"3/4 Created {len(chunks)} overlapping chunks.")
             model = load_embedding_model()
 
-                if FAISS_AVAILABLE:
+            if FAISS_AVAILABLE:
                 st.write("4/4 Creating embeddings and FAISS vector index...")
             else:
                 st.write("4/4 Creating embeddings and NumPy vector index (FAISS unavailable in this environment)...")
