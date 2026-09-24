@@ -1,7 +1,12 @@
 import os
 from typing import List, Dict, Tuple
 
-import faiss
+try:
+    import faiss
+    FAISS_AVAILABLE = True
+except Exception:
+    faiss = None
+    FAISS_AVAILABLE = False
 import numpy as np
 import streamlit as st
 from groq import Groq
@@ -116,8 +121,22 @@ def build_chunks(pages: List[Dict], filename: str) -> List[Dict]:
 # -----------------------------
 # Embeddings + FAISS
 # -----------------------------
-def create_faiss_index(chunks: List[Dict], model) -> faiss.Index:
-    """Embed chunks and store normalized vectors in a FAISS index."""
+class NumpyVectorIndex:
+    """Small fallback index used only if FAISS cannot be imported in the cloud."""
+
+    def __init__(self, embeddings: np.ndarray):
+        self.embeddings = embeddings
+        self.d = embeddings.shape[1] if embeddings.ndim == 2 else 0
+        self.ntotal = len(embeddings)
+
+    def search(self, query_embedding: np.ndarray, k: int):
+        scores = query_embedding @ self.embeddings.T
+        order = np.argsort(-scores[0])[:k]
+        return scores[:, order], order.reshape(1, -1)
+
+
+def create_faiss_index(chunks: List[Dict], model):
+    """Embed chunks and use FAISS when available, otherwise a NumPy fallback."""
     texts = [item["text"] for item in chunks]
 
     embeddings = model.encode(
@@ -131,15 +150,17 @@ def create_faiss_index(chunks: List[Dict], model) -> faiss.Index:
     dimension = embeddings.shape[1]
 
     # Inner product on normalized vectors = cosine similarity.
-    index = faiss.IndexFlatIP(dimension)
-    index.add(embeddings)
+    if FAISS_AVAILABLE:
+        index = faiss.IndexFlatIP(dimension)
+        index.add(embeddings)
+        return index
 
-    return index
+    return NumpyVectorIndex(embeddings)
 
 
 def retrieve_chunks(
     question: str,
-    index: faiss.Index,
+    index,
     chunks: List[Dict],
     model,
     top_k: int = TOP_K,
@@ -284,10 +305,16 @@ with st.sidebar:
     st.write("**Generation model:**")
     st.code(GROQ_MODEL, language="text")
 
-    st.info(
-        "The embedding model is open source. FAISS is an open-source "
-        "vector similarity-search library. Groq provides the LLM inference API."
-    )
+    if FAISS_AVAILABLE:
+        st.info(
+            "The embedding model is open source. FAISS is being used for "
+            "vector similarity search. Groq provides the LLM inference API."
+        )
+    else:
+        st.warning(
+            "FAISS could not be imported in this deployment, so the app is "
+            "using a NumPy similarity-search fallback. RAG functionality remains available."
+        )
 
 uploaded_file = st.file_uploader(
     "Upload a PDF document",
@@ -330,7 +357,10 @@ if uploaded_file is not None:
             st.write(f"3/4 Created {len(chunks)} overlapping chunks.")
             model = load_embedding_model()
 
-            st.write("4/4 Creating embeddings and FAISS vector index...")
+                if FAISS_AVAILABLE:
+                st.write("4/4 Creating embeddings and FAISS vector index...")
+            else:
+                st.write("4/4 Creating embeddings and NumPy vector index (FAISS unavailable in this environment)...")
             index = create_faiss_index(chunks, model)
 
             st.session_state.faiss_index = index
@@ -440,6 +470,7 @@ else:
 
 st.divider()
 st.caption(
-    "Note: FAISS storage in this version is session-based. Uploading a new PDF "
-    "builds a new in-memory index. The PDF itself is not permanently stored by this app."
+    "Note: Vector storage in this version is session-based. FAISS is used when available; "
+    "otherwise NumPy is used as a fallback. Uploading a new PDF builds a new in-memory index. "
+    "The PDF itself is not permanently stored by this app."
 )
