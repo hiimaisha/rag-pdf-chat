@@ -15,7 +15,7 @@ except Exception as exc:
     Groq = None
     GROQ_IMPORT_ERROR = exc
 from pypdf import PdfReader
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 
 
 # -----------------------------
@@ -37,10 +37,10 @@ TOP_K = 5
 # -----------------------------
 # Cached model
 # -----------------------------
-@st.cache_resource(show_spinner="Loading open-source embedding model...")
+@st.cache_resource(show_spinner="Loading lightweight open-source embedding model...")
 def load_embedding_model():
-    """Load the open-source Sentence Transformers embedding model once."""
-    return SentenceTransformer(EMBEDDING_MODEL)
+    """Load the lightweight open-source FastEmbed model once."""
+    return TextEmbedding(model_name=EMBEDDING_MODEL)
 
 
 # -----------------------------
@@ -143,13 +143,13 @@ def create_faiss_index(chunks: List[Dict], model):
     """Embed chunks and use FAISS when available, otherwise a NumPy fallback."""
     texts = [item["text"] for item in chunks]
 
-    embeddings = model.encode(
-        texts,
-        batch_size=32,
-        show_progress_bar=False,
-        convert_to_numpy=True,
-        normalize_embeddings=True,
-    ).astype("float32")
+    embeddings = np.asarray(
+        list(model.embed(texts)),
+        dtype="float32",
+    )
+
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    embeddings = embeddings / np.maximum(norms, 1e-12)
 
     dimension = embeddings.shape[1]
 
@@ -170,11 +170,13 @@ def retrieve_chunks(
     top_k: int = TOP_K,
 ) -> List[Tuple[Dict, float]]:
     """Retrieve the most relevant chunks for the user's question."""
-    question_embedding = model.encode(
-        [question],
-        convert_to_numpy=True,
-        normalize_embeddings=True,
-    ).astype("float32")
+    question_embedding = np.asarray(
+        list(model.embed([question])),
+        dtype="float32",
+    )
+
+    norms = np.linalg.norm(question_embedding, axis=1, keepdims=True)
+    question_embedding = question_embedding / np.maximum(norms, 1e-12)
 
     k = min(top_k, index.ntotal)
 
