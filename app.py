@@ -9,7 +9,11 @@ except Exception:
     FAISS_AVAILABLE = False
 import numpy as np
 import streamlit as st
-from groq import Groq
+try:
+    from groq import Groq
+except Exception as exc:
+    Groq = None
+    GROQ_IMPORT_ERROR = exc
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 
@@ -206,6 +210,9 @@ def get_groq_client() -> Groq:
             "GROQ_API_KEY is missing. Add it to Streamlit Secrets "
             "or set it as an environment variable."
         )
+
+    if Groq is None:
+        raise RuntimeError(f"Groq package could not be imported: {GROQ_IMPORT_ERROR}")
 
     return Groq(api_key=api_key)
 
